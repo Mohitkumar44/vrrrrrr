@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D VR Lens Simulation</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; font-family: sans-serif; }
+        #info {
+            position: absolute; top: 10px; left: 10px; color: white;
+            background: rgba(0,0,0,0.7); padding: 15px; border-radius: 8px;
+            pointer-events: none; line-height: 1.5;
+        }
+        .label { font-weight: bold; }
+        .red { color: #ff4444; }
+        .cyan { color: #00ffff; }
+        .green { color: #44ff44; }
+        .magenta { color: #ff00ff; }
+    </style>
+</head>
+<body>
+
+<div id="info">
+    <h2 style="margin-top:0">VR Optics 3D Simulation</h2>
+    <p><span class="label red">Red Plane:</span> Physical OLED Screen (Small & Close)</p>
+    <p><span class="label cyan">Blue Disc:</span> VR Lens (Bends Light)</p>
+    <p><span class="label green">Green Lines:</span> Real Light Rays entering Eye</p>
+    <p><span class="label magenta">Large Box:</span> Virtual Image (What you perceive)</p>
+    <small>Use Mouse to Rotate | Scroll to Zoom</small>
+</div>
+
+<!-- Load Three.js from CDN -->
+<script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // --- Scene Setup ---
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    camera.position.set(150, 50, 150);
+    controls.update();
+
+    // --- Lighting ---
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+    const pointLight = new THREE.PointLight(0xffffff, 1);
+    pointLight.position.set(50, 50, 100);
+    scene.add(pointLight);
+
+    // --- Constants (Physics) ---
+    const LENS_Z = 0;
+    const SCREEN_Z = -30;
+    const EYE_Z = 60;
+    const FOCAL_LENGTH = 45;
+    
+    // Lens Equation: 1/v = 1/f + 1/u 
+    const u = SCREEN_Z; // -30
+    const v = 1 / ( (1/FOCAL_LENGTH) + (1/u) ); // Virtual image position
+    const magnification = Math.abs(v / u);
+
+    // --- 1. The Physical Screen (Red) ---
+    const screenGeom = new THREE.PlaneGeometry(20, 20);
+    const screenMat = new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide });
+    const screen = new THREE.Mesh(screenGeom, screenMat);
+    screen.position.z = SCREEN_Z;
+    scene.add(screen);
+
+    // --- 2. The VR Lens (Cyan) ---
+    const lensGeom = new THREE.SphereGeometry(30, 32, 32);
+    lensGeom.scale(1, 1, 0.1); // Flatten sphere into a lens shape
+    const lensMat = new THREE.MeshPhongMaterial({ color: 0x00ffff, transparent: true, opacity: 0.4 });
+    const lens = new THREE.Mesh(lensGeom, lensMat);
+    lens.position.z = LENS_Z;
+    scene.add(lens);
+
+    // --- 3. The Eye (Sphere) ---
+    const eyeGeom = new THREE.SphereGeometry(5, 16, 16);
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const eye = new THREE.Mesh(eyeGeom, eyeMat);
+    eye.position.set(0, 0, EYE_Z);
+    scene.add(eye);
+
+    // --- 4. The Virtual Image (Magenta Wireframe) ---
+    const virtSize = 20 * magnification;
+    const virtGeom = new THREE.PlaneGeometry(virtSize, virtSize);
+    const virtMat = new THREE.MeshBasicMaterial({ color: 0xff00ff, wireframe: true, transparent: true, opacity: 0.5 });
+    const virtImage = new THREE.Mesh(virtGeom, virtMat);
+    virtImage.position.z = v;
+    scene.add(virtImage);
+
+    // --- 5. Light Rays (Green & Dashed Magenta) ---
+    const corners = [
+        [10, 10], [-10, 10], [10, -10], [-10, -10]
+    ];
+
+    corners.forEach(c => {
+        // Point on lens where ray hits
+        const lensX = c[0] * 1.5;
+        const lensY = c[1] * 1.5;
+
+        // REAL RAY: Screen -> Lens -> Eye
+        const realPoints = [];
+        realPoints.push(new THREE.Vector3(c[0], c[1], SCREEN_Z)); // Start at screen
+        realPoints.push(new THREE.Vector3(lensX, lensY, LENS_Z)); // Hit lens
+        realPoints.push(new THREE.Vector3(0, 0, EYE_Z));         // Enter eye center
+        
+        const lineGeom = new THREE.BufferGeometry().setFromPoints(realPoints);
+        const lineMat = new THREE.LineBasicMaterial({ color: 0x00ff00 });
+        const line = new THREE.Line(lineGeom, lineMat);
+        scene.add(line);
+
+        // VIRTUAL RAY (Dashed): Eye-line back to Virtual Image
+        const virtPoints = [];
+        virtPoints.push(new THREE.Vector3(lensX, lensY, LENS_Z));
+        virtPoints.push(new THREE.Vector3(c[0] * magnification, c[1] * magnification, v));
+        
+        const vLineGeom = new THREE.BufferGeometry().setFromPoints(virtPoints);
+        const vLineMat = new THREE.LineDashedMaterial({ color: 0xff00ff, dashSize: 2, gapSize: 2 });
+        const vLine = new THREE.Line(vLineGeom, vLineMat);
+        vLine.computeLineDistances();
+        scene.add(vLine);
+    });
+
+    // Axis Helper
+    const axesHelper = new THREE.AxesHelper(100);
+    scene.add(axesHelper);
+
+    // Animation Loop
+    function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+    }
+
+    // Handle Resize
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    animate();
+</script>
+</body>
+</html>
